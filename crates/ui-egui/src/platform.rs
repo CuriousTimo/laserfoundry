@@ -150,6 +150,23 @@ pub trait Platform {
         None
     }
 
+    /// Whether this page was served by a Maker Connect hub (the web host asks the hub's `info` call at start). Only then
+    /// does the File menu offer "Send to a laser…".
+    fn hub_available(&self) -> bool {
+        false
+    }
+
+    /// Starts sending `request` to the hub that served this page (same origin, the person's own session). False when this
+    /// host cannot, or one is already running.
+    fn start_hub(&self, _request: laserfoundry_ai::maker_connect::HubRequest) -> bool {
+        false
+    }
+
+    /// Once, after a started hub request has finished: the HTTP status and body, or why nothing came back.
+    fn take_hub(&self) -> Option<Result<(u16, String), String>> {
+        None
+    }
+
     /// Which services the app talks to: the real ones, or the staging pair a test run asked for (the web app's
     /// `?services=staging`). Desktop hosts always use the real ones.
     fn services(&self) -> laserfoundry_ai::services::Services {

@@ -92,6 +92,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "maker_connect"
+path = "fuzz_targets/maker_connect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "font_index"
 path = "fuzz_targets/font_index.rs"
 test = false

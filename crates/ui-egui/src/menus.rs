@@ -222,6 +222,12 @@ fn file_menu(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
         app.open_ai(crate::ai_ui::Window::Publish);
         ui.close();
     }
+    if app.hub_available()
+        && ui.button(tr("Send to a laser…")).on_hover_text(tr("Load this drawing's G-code on a laser of this hub; nothing starts")).clicked()
+    {
+        app.open_hub_window();
+        ui.close();
+    }
     if ui.button(tr("Save G-code…")).clicked() {
         if app.platform_browser_files() {
             if let Some(v) = app.run("job.gcode", json!({ "include": true }))

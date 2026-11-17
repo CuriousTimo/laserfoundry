@@ -8,10 +8,17 @@
 
 pub mod fontindex;
 mod page;
+// Web Serial's pure parts: left out with the machine link (the `machine-link` feature; Maker Connect's change).
+#[cfg(feature = "machine-link")]
 pub mod serial_close;
+#[cfg(feature = "machine-link")]
 pub mod serial_pick;
+#[cfg(feature = "machine-link")]
 pub mod serial_signals;
 pub mod service;
+
+#[cfg(all(target_arch = "wasm32", feature = "machine-link"))]
+mod serial_web;
 
 #[cfg(target_arch = "wasm32")]
 mod web {
@@ -21,9 +28,9 @@ mod web {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
-    use crate::serial_close::{CloseStep, Held, Teardown};
-    use crate::serial_pick::{PortId, choose};
-    use crate::serial_signals::{Moment, lines_at};
+    #[cfg(feature = "machine-link")]
+    use crate::serial_web::{open_serial_port, web_serial_available};
+
     use laserfoundry_device::Transport;
     use laserfoundry_ui_egui::{Fetched, FontDownload, FontDownloadFailure, LaserFoundryApp, Platform, Upload};
     use wasm_bindgen::prelude::*;
@@ -39,19 +46,23 @@ mod web {
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .map_err(|_| JsValue::from_str("that element is not a canvas"))?;
         restore_fonts();
+        // Whether a Maker Connect hub served this page (Maker Connect's change): asked of the page's own origin only.
+        let hub_found = hub_serves_this_page().await;
         let leave_warning = Rc::new(Cell::new(false));
         install_leave_warning(&leave_warning);
         eframe::WebRunner::new()
             .start(
                 canvas,
                 eframe::WebOptions::default(),
-                Box::new(|_cc| {
+                Box::new(move |_cc| {
                     Ok(Box::new(Host {
                         app: LaserFoundryApp::new(
                             Session::new(),
                             Box::new(WebPlatform {
                                 inbox: Rc::new(RefCell::new(None)),
                                 serial: Rc::new(RefCell::new(None)),
+                                hub: hub_found,
+                                hub_job: Rc::new(RefCell::new(HubJob::default())),
                                 font_job: Rc::new(RefCell::new(FontJob::default())),
                                 leave_warning,
                                 http_job: Rc::new(RefCell::new(HttpJob::default())),
@@ -89,7 +100,12 @@ mod web {
         /// The chosen file once it has been read (shared with the browser callbacks).
         inbox: Rc<RefCell<Option<Upload>>>,
         /// The serial device once the person has chosen it and it is open (or why not).
+        #[cfg_attr(not(feature = "machine-link"), allow(dead_code))]
         serial: Rc<RefCell<Option<Result<Box<dyn Transport + Send>, String>>>>,
+        /// Whether a Maker Connect hub served this page (the File menu then offers "Send to a laser…").
+        hub: bool,
+        /// The request to that hub in flight (or its answer, not yet taken).
+        hub_job: Rc<RefCell<HubJob>>,
         font_job: Rc<RefCell<FontJob>>,
         /// Whether closing the page would lose work or stop a job halfway (read by the `beforeunload` handler).
         leave_warning: Rc<Cell<bool>>,
@@ -138,7 +154,8 @@ mod web {
         }
 
         fn http_available(&self) -> bool {
-            BUILT_IN_SERVICE.is_some_and(|s| crate::service::origin(s).is_some())
+            // served by a Maker Connect hub (Maker Connect's change): the page talks to that hub only, not to the AI services
+            !self.hub && BUILT_IN_SERVICE.is_some_and(|s| crate::service::origin(s).is_some())
         }
 
         fn start_http(&self, request: laserfoundry_ai::HttpRequest) -> bool {
@@ -261,10 +278,49 @@ mod web {
             true
         }
 
+        fn hub_available(&self) -> bool {
+            self.hub
+        }
+
+        fn start_hub(&self, request: laserfoundry_ai::maker_connect::HubRequest) -> bool {
+            if !self.hub || !laserfoundry_ai::maker_connect::path_allowed(&request.path) {
+                return false;
+            }
+            {
+                let mut job = self.hub_job.borrow_mut();
+                if job.running {
+                    return false;
+                }
+                job.running = true;
+                job.result = None;
+            }
+            let job = Rc::clone(&self.hub_job);
+            spawn_local(async move {
+                let result = hub_call(&request).await;
+                let mut job = job.borrow_mut();
+                job.running = false;
+                job.result = Some(result);
+            });
+            true
+        }
+
+        fn take_hub(&self) -> Option<Result<(u16, String), String>> {
+            self.hub_job.borrow_mut().result.take()
+        }
+
+        // Without the `machine-link` feature the page has no machine link at all: no serial, and LaserFoundry's own
+        // "not available in this build" text where a machine would be connected.
+        #[cfg(not(feature = "machine-link"))]
+        fn machine_available(&self) -> bool {
+            false
+        }
+
+        #[cfg(feature = "machine-link")]
         fn serial_async(&self) -> bool {
             true
         }
 
+        #[cfg(feature = "machine-link")]
         fn request_serial(&self) {
             let slot = Rc::clone(&self.serial);
             spawn_local(async move {
@@ -273,12 +329,17 @@ mod web {
             });
         }
 
+        #[cfg(feature = "machine-link")]
         fn take_serial(&self) -> Option<Result<Box<dyn Transport + Send>, String>> {
             self.serial.borrow_mut().take()
         }
 
         fn serial_ports(&self) -> Vec<String> {
-            if web_serial_available() { vec!["USB serial device".into()] } else { Vec::new() }
+            #[cfg(feature = "machine-link")]
+            if web_serial_available() {
+                return vec!["USB serial device".into()];
+            }
+            Vec::new()
         }
 
         fn open_serial(&self, _: &str) -> Result<Box<dyn Transport + Send>, String> {
@@ -332,265 +393,10 @@ mod web {
         web_sys::Url::revoke_object_url(&url)
     }
 
-    // ---- Web Serial ----------------------------------------------------------------------------
-    // The API is not in web-sys's stable set, so the few calls needed are declared here.
-
-    #[wasm_bindgen]
-    extern "C" {
-        #[wasm_bindgen(js_namespace = ["navigator", "serial"], js_name = requestPort, catch)]
-        fn serial_request_port() -> Result<js_sys::Promise, JsValue>;
-
-        #[wasm_bindgen(js_namespace = ["navigator", "serial"], js_name = getPorts, catch)]
-        fn serial_get_ports() -> Result<js_sys::Promise, JsValue>;
-
-        type SerialPort;
-        #[wasm_bindgen(method, js_name = getInfo)]
-        fn get_info(this: &SerialPort) -> JsValue;
-        #[wasm_bindgen(method, js_name = open)]
-        fn open(this: &SerialPort, options: &JsValue) -> js_sys::Promise;
-        #[wasm_bindgen(method, js_name = close)]
-        fn close(this: &SerialPort) -> js_sys::Promise;
-        #[wasm_bindgen(method, js_name = setSignals)]
-        fn set_signals(this: &SerialPort, signals: &JsValue) -> js_sys::Promise;
-        #[wasm_bindgen(method, getter)]
-        fn readable(this: &SerialPort) -> Stream;
-        #[wasm_bindgen(method, getter)]
-        fn writable(this: &SerialPort) -> Stream;
-
-        type Stream;
-        #[wasm_bindgen(method, js_name = getReader, catch)]
-        fn get_reader(this: &Stream) -> Result<Reader, JsValue>;
-        #[wasm_bindgen(method, js_name = getWriter, catch)]
-        fn get_writer(this: &Stream) -> Result<Writer, JsValue>;
-
-        type Reader;
-        #[wasm_bindgen(method)]
-        fn read(this: &Reader) -> js_sys::Promise;
-        #[wasm_bindgen(method)]
-        fn cancel(this: &Reader) -> js_sys::Promise;
-        #[wasm_bindgen(method, js_name = releaseLock)]
-        fn release_lock(this: &Reader);
-
-        type Writer;
-        #[wasm_bindgen(method)]
-        fn write(this: &Writer, chunk: &JsValue) -> js_sys::Promise;
-        #[wasm_bindgen(method)]
-        fn close(this: &Writer) -> js_sys::Promise;
-        #[wasm_bindgen(method, js_name = releaseLock)]
-        fn release_lock(this: &Writer);
-    }
-
-    /// GRBL's usual speed.
-    const BAUD: f64 = 115_200.0;
-
-    fn web_serial_available() -> bool {
-        web_sys::window().is_some_and(|w| js_sys::Reflect::has(&w.navigator(), &JsValue::from_str("serial")).unwrap_or(false))
-    }
-
-    fn describe(e: JsValue) -> String {
+    pub(crate) fn describe(e: JsValue) -> String {
         e.as_string()
             .or_else(|| js_sys::Reflect::get(&e, &JsValue::from_str("message")).ok().and_then(|m| m.as_string()))
             .unwrap_or_else(|| "the browser refused".into())
-    }
-
-    thread_local! {
-        /// The device opened last, so a reconnect picks it again when several ports are granted.
-        static LAST_PORT: std::cell::Cell<Option<PortId>> = const { std::cell::Cell::new(None) };
-    }
-
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // the value is range-checked just above the cast
-    fn port_id(port: &SerialPort) -> PortId {
-        let info = port.get_info();
-        let field = |name: &str| {
-            js_sys::Reflect::get(&info, &JsValue::from_str(name))
-                .ok()
-                .and_then(|v| v.as_f64())
-                .filter(|v| (0.0..=f64::from(u16::MAX)).contains(v))
-                .map(|v| v as u16)
-        };
-        PortId { vendor: field("usbVendorId"), product: field("usbProductId") }
-    }
-
-    /// A port the person already granted, if one is the obvious choice (no picker on reconnect).
-    async fn granted_port() -> Option<SerialPort> {
-        let list = JsFuture::from(serial_get_ports().ok()?).await.ok()?;
-        let ports: Vec<SerialPort> = js_sys::Array::from(&list).iter().map(|p| p.unchecked_into()).collect();
-        let ids: Vec<PortId> = ports.iter().map(port_id).collect();
-        let index = choose(&ids, LAST_PORT.with(|l| l.get()))?;
-        ports.into_iter().nth(index)
-    }
-
-    /// Reopens an already-granted port, or asks the person to choose a serial device; opens it and starts the reader.
-    async fn open_serial_port() -> Result<Box<dyn Transport + Send>, JsValue> {
-        if !web_serial_available() {
-            return Err(JsValue::from_str("this browser has no Web Serial (use a Chromium-based browser)"));
-        }
-        let port: SerialPort = match granted_port().await {
-            Some(port) => port,
-            None => JsFuture::from(serial_request_port()?).await?.unchecked_into(),
-        };
-        LAST_PORT.with(|l| l.set(Some(port_id(&port))));
-        let options = js_sys::Object::new();
-        js_sys::Reflect::set(&options, &JsValue::from_str("baudRate"), &JsValue::from_f64(BAUD))?;
-        JsFuture::from(port.open(&options)).await?;
-        lower_signals(&port, Moment::AfterOpen).await;
-        // From here the port is open: any failure below must close it again or the next Connect cannot open it.
-        let port = Rc::new(port);
-        let reader = match port.readable().get_reader() {
-            Ok(reader) => Rc::new(reader),
-            Err(e) => {
-                close_port_steps(&port, None, None, Teardown::default().steps(Held::default())).await;
-                return Err(e);
-            }
-        };
-        let writer = match port.writable().get_writer() {
-            Ok(writer) => Rc::new(writer),
-            Err(e) => {
-                let steps = Teardown::default().steps(Held { reader: true, writer: false });
-                close_port_steps(&port, Some(&*reader), None, steps).await;
-                return Err(e);
-            }
-        };
-        let inbox = Rc::new(RefCell::new(Inbox::default()));
-        let task_reader = Rc::clone(&reader);
-        let reading = Rc::clone(&inbox);
-        spawn_local(async move {
-            loop {
-                let Ok(chunk) = JsFuture::from(task_reader.read()).await else { break };
-                let done = js_sys::Reflect::get(&chunk, &JsValue::from_str("done")).ok().and_then(|d| d.as_bool()).unwrap_or(true);
-                if done {
-                    break;
-                }
-                if let Ok(value) = js_sys::Reflect::get(&chunk, &JsValue::from_str("value")) {
-                    let mut inbox = reading.borrow_mut();
-                    inbox.bytes.extend(js_sys::Uint8Array::new(&value).to_vec());
-                    // A device at the wrong speed (or a hostile one) may never send a line end: keep only the newest bytes.
-                    let excess = inbox.bytes.len().saturating_sub(MAX_INBOX_BYTES);
-                    inbox.bytes.drain(..excess);
-                }
-            }
-            reading.borrow_mut().closed = true;
-        });
-        let outbox = Rc::new(RefCell::new(Outbox::default()));
-        Ok(Box::new(WebSerial { inbox, outbox, port, reader, writer, teardown: Teardown::default() }))
-    }
-
-    /// Shuts the port down in the order [`Teardown`] gives. Every step is attempted even if one fails.
-    async fn close_port_steps(port: &SerialPort, reader: Option<&Reader>, writer: Option<&Writer>, steps: Vec<CloseStep>) {
-        for step in steps {
-            match (step, reader, writer) {
-                (CloseStep::CancelReader, Some(r), _) => drop(JsFuture::from(r.cancel()).await),
-                (CloseStep::CloseWriter, _, Some(w)) => drop(JsFuture::from(w.close()).await),
-                (CloseStep::ReleaseReader, Some(r), _) => r.release_lock(),
-                (CloseStep::ReleaseWriter, _, Some(w)) => w.release_lock(),
-                (CloseStep::ClosePort, ..) => {
-                    lower_signals(port, Moment::BeforeClose).await;
-                    drop(JsFuture::from(port.close()).await);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Drives DTR and RTS to the state [`lines_at`] gives, so an auto-reset board is not held in reset or sent into its bootloader.
-    /// Best effort: a device without these lines refuses, which is fine. Nothing is written to the controller.
-    async fn lower_signals(port: &SerialPort, moment: Moment) {
-        let lines = lines_at(moment);
-        let signals = js_sys::Object::new();
-        for (name, on) in [("dataTerminalReady", lines.data_terminal_ready), ("requestToSend", lines.request_to_send)] {
-            if js_sys::Reflect::set(&signals, &JsValue::from_str(name), &JsValue::from_bool(on)).is_err() {
-                return;
-            }
-        }
-        drop(JsFuture::from(port.set_signals(&signals)).await);
-    }
-
-    /// Most unread serial bytes kept (GRBL's replies are a few dozen bytes a line).
-    const MAX_INBOX_BYTES: usize = 64 * 1024;
-
-    #[derive(Default)]
-    struct Inbox {
-        bytes: std::collections::VecDeque<u8>,
-        closed: bool,
-    }
-
-    #[derive(Default)]
-    struct Outbox {
-        chunks: std::collections::VecDeque<Vec<u8>>,
-        pumping: bool,
-    }
-
-    /// A serial device as a non-blocking [`Transport`]: reads come from what the reader task has
-    /// collected, and writes are queued for a task that sends them in order.
-    struct WebSerial {
-        inbox: Rc<RefCell<Inbox>>,
-        outbox: Rc<RefCell<Outbox>>,
-        port: Rc<SerialPort>,
-        reader: Rc<Reader>,
-        writer: Rc<Writer>,
-        teardown: Teardown,
-    }
-
-    /// Disconnecting, a lost connection and a failed handshake all end by dropping the transport: close the
-    /// port then, or the tab keeps it open and locked and the next Connect fails.
-    impl Drop for WebSerial {
-        fn drop(&mut self) {
-            let steps = self.teardown.steps(Held { reader: true, writer: true });
-            let (port, reader, writer) = (Rc::clone(&self.port), Rc::clone(&self.reader), Rc::clone(&self.writer));
-            self.inbox.borrow_mut().closed = true;
-            spawn_local(async move { close_port_steps(&port, Some(&*reader), Some(&*writer), steps).await });
-        }
-    }
-
-    // SAFETY-ish note: the browser build is single-threaded (wasm32 without atomics has no other
-    // thread to move this to), so the `Send` the link's API asks for cannot be violated.
-    unsafe impl Send for WebSerial {}
-
-    impl Transport for WebSerial {
-        fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-            if self.inbox.borrow().closed {
-                return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the serial device was closed"));
-            }
-            let start = {
-                let mut out = self.outbox.borrow_mut();
-                out.chunks.push_back(bytes.to_vec());
-                !std::mem::replace(&mut out.pumping, true)
-            };
-            if start {
-                let (outbox, writer, inbox) = (Rc::clone(&self.outbox), Rc::clone(&self.writer), Rc::clone(&self.inbox));
-                spawn_local(async move {
-                    loop {
-                        let next = {
-                            let mut out = outbox.borrow_mut();
-                            let next = out.chunks.pop_front();
-                            if next.is_none() {
-                                out.pumping = false;
-                            }
-                            next
-                        };
-                        let Some(chunk) = next else { break };
-                        if JsFuture::from(writer.write(&js_sys::Uint8Array::from(chunk.as_slice()))).await.is_err() {
-                            inbox.borrow_mut().closed = true;
-                            outbox.borrow_mut().pumping = false;
-                            break;
-                        }
-                    }
-                });
-            }
-            Ok(())
-        }
-
-        fn read_line(&mut self, _timeout: std::time::Duration) -> std::io::Result<Option<String>> {
-            let mut inbox = self.inbox.borrow_mut();
-            if let Some(end) = inbox.bytes.iter().position(|b| *b == b'\n') {
-                let line: Vec<u8> = inbox.bytes.drain(..=end).collect();
-                return Ok(Some(String::from_utf8_lossy(&line).trim_end_matches(['\r', '\n']).to_string()));
-            }
-            if inbox.closed {
-                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "the serial device was closed"));
-            }
-            Ok(None)
-        }
     }
 
     /// Where the installed font folders are remembered between visits.
@@ -606,6 +412,13 @@ mod web {
     /// The AI or account request in flight (or its answer, not yet taken).
     #[derive(Default)]
     struct HttpJob {
+        running: bool,
+        result: Option<Result<(u16, String), String>>,
+    }
+
+    /// The request to the hub that served the page (or its answer, not yet taken).
+    #[derive(Default)]
+    struct HubJob {
         running: bool,
         result: Option<Result<(u16, String), String>>,
     }
@@ -691,6 +504,57 @@ mod web {
             window.clear_timeout_with_handle(timer);
         }
         answer
+    }
+
+    /// Sends `request` to the page's own origin with the person's session cookie (`same-origin`: never to another site), and
+    /// returns the status and body. The path was checked by [`laserfoundry_ai::maker_connect::path_allowed`].
+    async fn hub_call(request: &laserfoundry_ai::maker_connect::HubRequest) -> Result<(u16, String), String> {
+        let window = web_sys::window().ok_or("no window")?;
+        let controller = web_sys::AbortController::new().map_err(describe)?;
+        let init = web_sys::RequestInit::new();
+        init.set_method(request.method);
+        init.set_credentials(web_sys::RequestCredentials::SameOrigin);
+        init.set_redirect(web_sys::RequestRedirect::Error);
+        init.set_signal(Some(&controller.signal()));
+        let headers = web_sys::Headers::new().map_err(describe)?;
+        // the hub answers a form sent by a page as data, not as a redirect to another page
+        headers.set("x-requested-with", "laserfoundry").map_err(describe)?;
+        if let Some(content_type) = request.content_type {
+            headers.set("content-type", content_type).map_err(describe)?;
+        }
+        init.set_headers(&headers);
+        if request.method == "POST" {
+            init.set_body(&JsValue::from_str(&request.body));
+        }
+        let abort = Closure::once_into_js(move || controller.abort());
+        let timer = window.set_timeout_with_callback_and_timeout_and_arguments_0(abort.unchecked_ref(), HTTP_TIMEOUT_MS).ok();
+        let answer = async {
+            let response: web_sys::Response = JsFuture::from(window.fetch_with_str_and_init(&request.path, &init))
+                .await
+                .map_err(describe)?
+                .dyn_into()
+                .map_err(|_| "the browser gave no response".to_string())?;
+            let status = response.status();
+            let text = JsFuture::from(response.text().map_err(describe)?).await.map_err(describe)?.as_string().ok_or("the answer is not text")?;
+            if text.len() > MAX_ANSWER {
+                return Err("the answer was larger than expected".to_string());
+            }
+            Ok((status, text))
+        }
+        .await;
+        if let Some(timer) = timer {
+            window.clear_timeout_with_handle(timer);
+        }
+        answer
+    }
+
+    /// Whether the hub's `info` call answers on this page's own origin, as a Maker Connect (a page from anywhere else gets
+    /// no such answer and the menu entry stays away).
+    async fn hub_serves_this_page() -> bool {
+        match hub_call(&laserfoundry_ai::maker_connect::info_request()).await {
+            Ok((status, body)) => laserfoundry_ai::maker_connect::read_info(status, &body),
+            Err(_) => false,
+        }
     }
 
     /// The service this page was built for (`LF_CLOUD_URL` when the site was built, else the shared Foundry service).

@@ -6,6 +6,11 @@ license.workspace = true
 publish = false
 description = "LaserFoundry in the browser (WebAssembly)"
 
+[features]
+# The machine link over Web Serial. On by default; Maker Connect builds the hub's copy without it (no `navigator.serial`).
+default = ["machine-link"]
+machine-link = []
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 

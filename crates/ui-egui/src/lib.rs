@@ -19,6 +19,7 @@ mod job_position;
 mod laser_presets;
 mod machine_report;
 mod machine_setup;
+mod maker_connect_ui;
 mod maker_ui;
 mod menus;
 mod nodes_ui;
@@ -256,6 +257,7 @@ pub struct LaserFoundryApp {
     pending_start: Option<(String, Option<Restart>)>,
     ai: ai_ui::AiState,
     maker: maker_ui::MakerState,
+    hub: maker_connect_ui::HubState,
     /// A web address to open in the browser at the next frame (a payment page).
     pending_url: Option<String>,
     /// The controller's settings were asked for on this connection (so jobs can be refused when laser mode is off).
@@ -462,6 +464,7 @@ impl LaserFoundryApp {
             pending_start: None,
             ai: ai_ui::AiState::default(),
             maker: maker_ui::MakerState::default(),
+            hub: maker_connect_ui::HubState::default(),
             pending_url: None,
             settings_asked: false,
             relative_start_trusted: false,
@@ -486,6 +489,7 @@ impl LaserFoundryApp {
         self.platform.set_leave_warning(self.job_active() || self.session.dirty);
         self.poll_ai(ui.ctx());
         self.poll_maker(ui.ctx());
+        self.poll_hub(ui.ctx());
         if let Some(url) = self.pending_url.take() {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
         }
@@ -515,6 +519,7 @@ impl LaserFoundryApp {
         control_box::show(self, ui.ctx());
         self.dialogs(ui.ctx());
         self.ai_windows(ui.ctx());
+        self.hub_window(ui.ctx());
     }
 
     /// Loads the saved translation, if there is one. A damaged file is reported and ignored.

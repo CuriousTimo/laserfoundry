@@ -10,3 +10,8 @@ Third-party material: this repository contains no bundled assets (icons are draw
 ATTRIBUTION.md). Rust dependencies are fetched from crates.io under their own licences. egui's
 default fonts are compiled in through the epaint_default_fonts crate (Ubuntu Light under the Ubuntu
 Font Licence 1.0, Hack under MIT, Noto Emoji under the SIL Open Font License 1.1).
+
+This copy is a modified fork (Maker Connect, 2026-11-17): it adds "Send to a laser" for a Maker Connect hub that serves the
+browser version, and a cargo feature `machine-link` (on by default) that leaves Web Serial out. Changed files: the ones listed
+in docs/maker-connect.md. The licence grants no right to the name "LaserFoundry"; the hub's page is titled
+"Laser design (LaserFoundry fork)".

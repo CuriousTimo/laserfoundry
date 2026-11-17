@@ -197,6 +197,26 @@ pub fn maker(data: &[u8]) {
     }
 }
 
+/// The Maker Connect hub's answers, and the requests built from a file name and G-code: whatever is built stays inside the
+/// hub's own calls.
+pub fn maker_connect(data: &[u8]) {
+    use laserfoundry_ai::maker_connect as hub;
+    let Some((first, rest)) = data.split_first() else { return };
+    let text = String::from_utf8_lossy(rest);
+    let status = [200u16, 201, 401, 403, 404, 409, 500][usize::from(*first >> 1) % 7];
+    let _ = hub::read_info(status, &text);
+    let _ = hub::read_lasers(status, &text);
+    let _ = hub::read_upload(status, &text);
+    let _ = hub::read_load(status, &text);
+    if first & 1 == 0 {
+        if let Ok(request) = hub::upload_request(&text, "G21\n") {
+            assert!(hub::path_allowed(&request.path), "{}", request.path);
+        }
+    } else if let Ok(request) = hub::load_request(&text, &text, true) {
+        assert!(hub::path_allowed(&request.path), "{}", request.path);
+    }
+}
+
 /// A command and its parameters: the first byte picks the command, the rest is JSON.
 pub fn command(data: &[u8]) {
     let Some((first, rest)) = data.split_first() else { return };
@@ -418,6 +438,19 @@ mod tests {
             for mut input in mutations(seed.as_bytes(), &mut rng, 1500) {
                 input.insert(0, first);
                 maker(&input);
+            }
+        }
+    }
+
+    #[test]
+    fn maker_connect_names_and_answers_survive_mutation() {
+        let lasers = r#"[{"id":"8c1f","name":"Ortur","online":true,"work_area_mm":[400.0,430.0],"laser":{"laser_mode":true}}]"#;
+        let ask = r#"{"loaded":"old.gcode","confirm":"old.gcode is loaded on this laser: replace it with a.gcode?"}"#;
+        for (first, seed) in [(0u8, "My sign: v2 ../x"), (1, "f3a9-1"), (0, lasers), (2, lasers), (10, ask), (4, r#"{"id":"f3a9"}"#)] {
+            let mut rng = Rng(0xc0_0000 + u64::from(first));
+            for mut input in mutations(seed.as_bytes(), &mut rng, 1500) {
+                input.insert(0, first);
+                maker_connect(&input);
             }
         }
     }

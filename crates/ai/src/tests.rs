@@ -611,3 +611,77 @@ mod maker_tests {
         }
     }
 }
+
+mod maker_connect_tests {
+    use crate::maker_connect::{self as hub, Load};
+
+    #[test]
+    fn only_the_hubs_own_calls_may_be_sent() {
+        for good in
+            ["/api/apps/v1/info", "/api/laser-design/lasers", "/api/files?name=sign.gcode", "/api/files?name=a%20b.gcode", "/files/f3a9-1/print"]
+        {
+            assert!(hub::path_allowed(good), "{good}");
+        }
+        for bad in [
+            "",
+            "https://evil.com/api/files?name=a.gcode",
+            "//evil.com/api/files?name=a.gcode",
+            "/api/files",
+            "/api/files?name=",
+            "/api/files?name=a&machine=b",
+            "/api/files/remove",
+            "/files//print",
+            "/files/../machines/x/start-burn",
+            "/files/x/print?replace=true",
+            "/machines/x/start-burn",
+            "/api/apps/v1/files",
+            "/files/x/frame",
+        ] {
+            assert!(!hub::path_allowed(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_gcode_goes_up_unchanged_under_a_clean_name() {
+        let gcode = "G21\nG90\nM5\n";
+        let r = hub::upload_request("My sign: v2 ../x.gcode", gcode).unwrap();
+        assert_eq!((r.method, r.body.as_str(), r.content_type), ("POST", gcode, Some("text/plain")));
+        assert_eq!(r.path, "/api/files?name=My%20sign_%20v2%20___x.gcode");
+        assert!(hub::path_allowed(&r.path));
+        assert_eq!(hub::gcode_name("é").as_deref(), Some("é.gcode"));
+        assert!(hub::upload_request("", gcode).is_err() && hub::upload_request("a", "  \n").is_err() && hub::upload_request("...", gcode).is_err());
+    }
+
+    #[test]
+    fn loading_replaces_only_when_asked_to() {
+        assert_eq!(hub::load_request("f1", "m1", false).unwrap().body, "machine=m1");
+        assert_eq!(hub::load_request("f1", "m1", true).unwrap().body, "machine=m1&replace=true");
+        for bad in ["", "a b", "a&replace=true", "../x", "a/b"] {
+            assert!(hub::load_request(bad, "m1", false).is_err() && hub::load_request("f1", bad, false).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_hubs_answers_are_read_strictly() {
+        assert!(hub::read_info(200, r#"{"service":"maker-connect","api":1}"#));
+        assert!(!hub::read_info(200, r#"{"service":"other"}"#) && !hub::read_info(404, "{}") && !hub::read_info(200, "<html>"));
+        assert_eq!(hub::read_upload(201, r#"{"id":"f3a9"}"#).unwrap(), "f3a9");
+        assert!(hub::read_upload(201, "{}").is_err() && hub::read_upload(200, r#"{"id":"x"}"#).is_err());
+        assert_eq!(hub::read_load(200, r#"{"loaded":"a.gcode"}"#).unwrap(), Load::Loaded("a.gcode".into()));
+        assert_eq!(
+            hub::read_load(409, r#"{"loaded":"old.gcode","confirm":"replace it?"}"#).unwrap(),
+            Load::Replace { loaded: "old.gcode".into(), question: "replace it?".into() }
+        );
+        // a plain 409 is a refusal in the hub's words, never a question
+        assert_eq!(hub::read_load(409, "a laser takes one job at a time").unwrap_err(), "a laser takes one job at a time");
+        assert!(hub::read_load(200, "{}").is_err() && hub::read_load(500, "x").is_err() && hub::read_load(401, "").is_err());
+        let lasers = hub::read_lasers(
+            200,
+            r#"[{"id":"a","name":"Ortur","model":"Ortur LM2","online":false,"work_area_mm":[400,430],"laser":{"laser_mode":false}},{"name":"no id"},7]"#,
+        )
+        .unwrap();
+        assert_eq!(lasers.len(), 1);
+        assert_eq!((lasers[0].work_area_mm, lasers[0].laser_mode, lasers[0].online), (Some([400.0, 430.0]), Some(false), false));
+        assert!(hub::read_lasers(200, "{}").is_err() && hub::read_lasers(403, "").is_err());
+    }
+}
