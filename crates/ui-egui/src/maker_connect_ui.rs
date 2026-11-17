@@ -37,6 +37,8 @@ pub(crate) struct HubState {
     lasers: Vec<Laser>,
     step: Step,
     note: Option<(String, bool)>,
+    /// The laser the last design was loaded on: its page on the hub is linked (to frame and start it there).
+    loaded_on: Option<Laser>,
 }
 
 impl LaserFoundryApp {
@@ -48,6 +50,7 @@ impl LaserFoundryApp {
     pub(crate) fn open_hub_window(&mut self) {
         self.hub.open = true;
         self.hub.note = None;
+        self.hub.loaded_on = None;
         self.ask_hub(Step::Listing, hub::lasers_request());
     }
 
@@ -88,6 +91,7 @@ impl LaserFoundryApp {
                     self.hub.note =
                         Some((trf!("{name} is loaded on {laser}. Frame it and start it at the laser.", name = name, laser = laser.name), false));
                     self.say(trf!("Sent to {laser}", laser = laser.name));
+                    self.hub.loaded_on = Some(laser);
                 }
                 Ok(Load::Replace { question, .. }) => self.hub.step = Step::Replacing { laser, file, question },
                 Err(e) => self.hub_failed(e),
@@ -112,6 +116,7 @@ impl LaserFoundryApp {
     /// Keeps the drawing's G-code, as **Save G-code** writes it, in the hub's Files; loading it on `laser` follows the answer.
     fn send_to(&mut self, laser: Laser) {
         self.hub.note = None;
+        self.hub.loaded_on = None;
         if self.session.doc.shapes.is_empty() {
             self.hub.note = Some((tr("Draw something first: there is nothing to send."), true));
             return;
@@ -180,6 +185,11 @@ impl LaserFoundryApp {
                 });
                 if let Some((text, bad)) = &self.hub.note {
                     ui.colored_label(if *bad { self.tokens.error } else { self.tokens.ok }, text.as_str());
+                    if let (false, Some(laser)) = (*bad, &self.hub.loaded_on) {
+                        // The laser's page on the same hub, in a new tab so this design stays open.
+                        let url = format!("/machines/{}#control", laser.id);
+                        ui.add(egui::Hyperlink::from_label_and_url(trf!("Open {laser}'s page", laser = laser.name), url).open_in_new_tab(true));
+                    }
                 }
             },
         );
