@@ -1384,6 +1384,16 @@ mod group_ui_tests {
         h.frame(vec![]);
         assert_eq!(h.app.session.doc.layers[3].name, "Outline");
     }
+
+    #[test]
+    fn the_sub_layer_section_renders_for_a_multi_layer() {
+        let mut h = Harness::new();
+        h.app.run("layer.sub_add", json!({"id": 0}));
+        h.app.run("layer.sub_add", json!({"id": 0}));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert!(h.app.session.doc.layer(0).is_some_and(|l| l.is_multi() && l.sub_layers.len() == 2));
+    }
 }
 
 mod override_and_grid_tests {
