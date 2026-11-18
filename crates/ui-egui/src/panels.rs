@@ -83,27 +83,34 @@ pub fn inspector(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
 fn machine_block(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new(tr("Machine")).id_salt("machine").default_open(true).show(ui, |ui| {
         let m = app.session.doc.machine.clone();
-        let state = app.snap.as_ref().and_then(|s| s.status.as_ref()).map(|s| s.state);
-        let status = crate::machine_setup::status_label(app.link.is_some(), app.target == Target::Simulator, state, app.job_active());
-        ui.label(egui::RichText::new(status).strong());
-        if crate::machine_setup::alarm_banner_visible(app.link.is_some(), state) {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.colored_label(app.tokens.selection, tr("The machine is in an alarm state. Unlock it ($X) before moving or running a job."));
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button(tr("Unlock")).on_hover_text(tr("Clear an alarm ($X)")).clicked() {
-                        app.link_do(Link::unlock);
-                    }
-                    ui.label(tr("The jog pad is under Move, below."));
+        let hosted = app.hub_available();
+        if !hosted {
+            let state = app.snap.as_ref().and_then(|s| s.status.as_ref()).map(|s| s.state);
+            let status = crate::machine_setup::status_label(app.link.is_some(), app.target == Target::Simulator, state, app.job_active());
+            ui.label(egui::RichText::new(status).strong());
+            if crate::machine_setup::alarm_banner_visible(app.link.is_some(), state) {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.colored_label(app.tokens.selection, tr("The machine is in an alarm state. Unlock it ($X) before moving or running a job."));
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(tr("Unlock")).on_hover_text(tr("Clear an alarm ($X)")).clicked() {
+                            app.link_do(Link::unlock);
+                        }
+                        ui.label(tr("The jog pad is under Move, below."));
+                    });
                 });
-            });
+            }
         }
         let name = if m.name.trim().is_empty() { tr("Unnamed machine") } else { m.name.clone() };
         ui.label(name);
         let origin = if m.origin == Origin::BottomLeft { tr("bottom-left") } else { tr("top-left") };
         ui.label(trf!("Bed {w} × {h} mm, origin {origin}", w = m.bed_width, h = m.bed_height, origin = origin));
-        connection(app, ui);
-        if ui.button(tr("Machine settings…")).on_hover_text(tr("Set up the machine step by step")).clicked() {
-            crate::machine_setup::open(app);
+        if hosted {
+            app.hub_laser_picker(ui);
+        } else {
+            connection(app, ui);
+            if ui.button(tr("Machine settings…")).on_hover_text(tr("Set up the machine step by step")).clicked() {
+                crate::machine_setup::open(app);
+            }
         }
         device(app, ui);
     });

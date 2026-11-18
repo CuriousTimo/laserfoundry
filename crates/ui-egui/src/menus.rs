@@ -433,21 +433,26 @@ pub(crate) fn arrange_menu(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
 }
 
 fn laser_menu(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
-    if ui.button(tr("Machine setup…")).on_hover_text(tr("Connect, read the controller, test directions, name the machine")).clicked() {
-        crate::machine_setup::open(app);
-        ui.close();
+    // A hub-served page never reaches a machine: its machine setup and report are the hub's.
+    let hosted = app.hub_available();
+    if !hosted {
+        if ui.button(tr("Machine setup…")).on_hover_text(tr("Connect, read the controller, test directions, name the machine")).clicked() {
+            crate::machine_setup::open(app);
+            ui.close();
+        }
+        ui.separator();
     }
-    ui.separator();
     if ui.button(tr("Generate G-code")).clicked() {
         if app.run("job.gcode", Value::Null).is_some() {
             app.say(tr("G-code generated"));
         }
         ui.close();
     }
-    if ui
-        .button(tr("Save machine report…"))
-        .on_hover_text(tr("The controller's settings, the console and what this program assumes, as text to send with a problem"))
-        .clicked()
+    if !hosted
+        && ui
+            .button(tr("Save machine report…"))
+            .on_hover_text(tr("The controller's settings, the console and what this program assumes, as text to send with a problem"))
+            .clicked()
     {
         app.save_machine_report();
         ui.close();

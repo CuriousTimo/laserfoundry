@@ -46,6 +46,8 @@ pub struct Laser {
     pub work_area_mm: Option<[f64; 2]>,
     /// `$32`: `Some(false)` when the beam would stay on while the head stops, which the hub refuses.
     pub laser_mode: Option<bool>,
+    /// `$30`, as the controller reported it: `None` while the laser is offline (never read).
+    pub max_s: Option<u32>,
 }
 
 /// What the hub did with a file sent for a laser.
@@ -106,6 +108,7 @@ fn laser(v: &Value) -> Option<Laser> {
         online: v.get("online").and_then(Value::as_bool).unwrap_or(false),
         work_area_mm: area.filter(|[x, y]| x.is_finite() && y.is_finite()),
         laser_mode: v.pointer("/laser/laser_mode").and_then(Value::as_bool),
+        max_s: v.pointer("/laser/max_s").and_then(Value::as_f64).filter(|s| s.is_finite() && *s >= 1.0 && *s <= 100_000.0).map(|s| s.round() as u32),
     })
 }
 

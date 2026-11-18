@@ -682,6 +682,9 @@ mod maker_connect_tests {
         .unwrap();
         assert_eq!(lasers.len(), 1);
         assert_eq!((lasers[0].work_area_mm, lasers[0].laser_mode, lasers[0].online), (Some([400.0, 430.0]), Some(false), false));
+        assert_eq!(lasers[0].max_s, None, "offline: never read");
+        let read = hub::read_lasers(200, r#"[{"id":"a","name":"A","laser":{"max_s":1000.0}},{"id":"b","name":"B","laser":{"max_s":0}}]"#).unwrap();
+        assert_eq!((read[0].max_s, read[1].max_s), (Some(1000), None));
         assert!(hub::read_lasers(200, "{}").is_err() && hub::read_lasers(403, "").is_err());
     }
 }

@@ -16,6 +16,47 @@ use crate::Platform;
 const SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="20mm" viewBox="0 0 40 20"><rect width="40" height="20" fill="none" stroke="#ff0000"/></svg>"##;
 const LASERS: &str = r#"[{"id":"8c1f","name":"Ortur","kind":"laser","model":"Ortur Laser Master 2","online":true,"work_area_mm":[400.0,430.0],"laser":{"power_w":10.0,"max_s":1000.0,"laser_mode":true},"may":"use"}]"#;
 
+mod picker_tests {
+    use super::*;
+
+    #[test]
+    fn picking_an_online_laser_sets_the_bed_and_max_s_from_the_hub() {
+        let (mut app, _shared) = app_with_lasers();
+        let laser = app.hub.lasers[0].clone();
+        app.pick_laser(&laser);
+        let m = &app.session.doc.machine;
+        assert_eq!((m.bed_width, m.bed_height, m.max_s), (400.0, 430.0, 1000));
+        assert_eq!(app.hub.picked.as_deref(), Some("8c1f"));
+    }
+
+    #[test]
+    fn an_offline_laser_gives_its_profile_bed_and_leaves_max_s_alone() {
+        let (mut app, shared) = app_with_lasers();
+        let offline = r#"[{"id":"b2","name":"Spare","online":false,"work_area_mm":[300.0,200.0],"laser":{"power_w":5.0,"laser_mode":true}}]"#;
+        app.hub.listed = true;
+        app.ask_hub(Step::Listing, hub::lasers_request());
+        answer(&mut app, &shared, 200, offline);
+        let laser = app.hub.lasers[0].clone();
+        assert_eq!(laser.max_s, None);
+        let before = app.session.doc.machine.max_s;
+        app.pick_laser(&laser);
+        let m = &app.session.doc.machine;
+        assert_eq!((m.bed_width, m.bed_height, m.max_s), (300.0, 200.0, before), "Max S stays typable: nothing was read");
+    }
+
+    #[test]
+    fn the_machine_panel_asks_for_the_lasers_once() {
+        let shared = Rc::new(RefCell::new(Shared::default()));
+        let mut app = fresh(&shared);
+        let ctx = egui::Context::default();
+        for _ in 0..3 {
+            ctx.run_ui(egui::RawInput::default(), |ui| app.hub_laser_picker(ui)).drop_without_applying_deltas();
+        }
+        assert_eq!(shared.borrow().sent.len(), 1);
+        assert_eq!(shared.borrow().sent[0].path, "/api/laser-design/lasers");
+    }
+}
+
 mod send_tests {
     use super::*;
 
