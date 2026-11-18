@@ -39,12 +39,59 @@ pub(crate) struct HubState {
     note: Option<(String, bool)>,
     /// The laser the last design was loaded on: its page on the hub is linked (to frame and start it there).
     loaded_on: Option<Laser>,
+    /// The Machine panel has asked for the list once (the window's own refresh asks again).
+    listed: bool,
+    /// The laser picked in the Machine panel (its id).
+    picked: Option<String>,
 }
 
 impl LaserFoundryApp {
     /// Whether the File menu offers sending to a laser.
     pub(crate) fn hub_available(&self) -> bool {
         self.platform.hub_available()
+    }
+
+    /// The Machine panel of a hub-served page: the hub's lasers to pick from. Picking one sets the bed from the laser's work area
+    /// and Max S from what the controller reported; a laser that is offline gives its profile's bed and leaves Max S to be typed.
+    pub(crate) fn hub_laser_picker(&mut self, ui: &mut egui::Ui) {
+        if !self.hub.listed && matches!(self.hub.step, Step::Idle) {
+            self.hub.listed = true;
+            self.ask_hub(Step::Listing, hub::lasers_request());
+        }
+        let picked = self.hub.picked.as_ref().and_then(|id| self.hub.lasers.iter().find(|l| &l.id == id)).cloned();
+        let mut choose = None;
+        ui.horizontal(|ui| {
+            ui.label(tr("Laser"));
+            let text = picked.as_ref().map(|l| l.name.clone()).unwrap_or_else(|| tr("Choose a laser"));
+            egui::ComboBox::from_id_salt("hub_laser").selected_text(text).show_ui(ui, |ui| {
+                for laser in &self.hub.lasers {
+                    if ui.selectable_label(picked.as_ref().is_some_and(|p| p.id == laser.id), laser.name.as_str()).clicked() {
+                        choose = Some(laser.clone());
+                    }
+                }
+            });
+        });
+        if self.hub.lasers.is_empty() && matches!(self.hub.step, Step::Idle) {
+            ui.weak(tr("No laser here that you may use."));
+        }
+        if let Some(laser) = choose {
+            self.pick_laser(&laser);
+        }
+        if picked.is_some_and(|l| l.max_s.is_none()) {
+            ui.weak(tr("laser offline: Max S not read"));
+        }
+    }
+
+    /// Sets the bed (and Max S, when the hub has it) from `laser`.
+    pub(crate) fn pick_laser(&mut self, laser: &Laser) {
+        self.hub.picked = Some(laser.id.clone());
+        if let Some([w, h]) = laser.work_area_mm.filter(|[w, h]| *w >= 1.0 && *h >= 1.0) {
+            self.run("machine.set", json!({ "bed_width": w, "bed_height": h }));
+            self.view = None;
+        }
+        if let Some(s) = laser.max_s {
+            self.run("machine.set", json!({ "max_s": s }));
+        }
     }
 
     pub(crate) fn open_hub_window(&mut self) {

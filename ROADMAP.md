@@ -15,6 +15,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 
 ## Progress log
 
+- **2026-11-19 (Maker Connect fork):** on a hub-served page the Machine panel shows a laser picker (the hub's lasers) instead of the status, Connect and "Machine settings…"; Laser → "Machine setup…" and "Save machine report…" are hidden. Picking a laser sets the bed from its work area and Max S from what the controller reported; an offline laser gives its profile bed, Max S stays typable with the note "laser offline: Max S not read". Desktop/machine-link build unchanged. Checked: new unit tests (ai, ui-egui), `cargo xtask` layers/cleanroom/brands/wasm, wasm release build without Web Serial. Not done: origin/dialect/rotary/M4 per laser (hub side).
 - **2026-11-17 (Maker Connect fork):** "Send to a laser…" in the File menu of the browser version when a Maker Connect hub served the page
   (`crates/ai/src/maker_connect.rs`, `crates/ui-egui/src/maker_connect_ui.rs`, `Platform::hub_*`); cargo feature `machine-link` (default on)
   leaves Web Serial out (`apps/laserfoundry-web/src/serial_web.rs`, `machine_available()` false). Checked: unit tests for the allow-list, the
