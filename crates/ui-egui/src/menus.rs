@@ -10,6 +10,12 @@ pub fn menu_bar(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
             ui.menu_button(tr("Edit"), |ui| edit_menu(app, ui));
             ui.menu_button(tr("Arrange"), |ui| arrange_menu(app, ui));
             ui.menu_button(tr("Laser"), |ui| laser_menu(app, ui));
+            ui.menu_button(tr("Tools"), |ui| {
+                if ui.button(tr("Fit test card…")).clicked() {
+                    app.fit_test_open = true;
+                    ui.close();
+                }
+            });
             if app.platform.http_available() {
                 ui.menu_button(tr("AI"), |ui| ai_menu(app, ui));
             }
@@ -228,11 +234,13 @@ fn file_menu(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
                 && let Some(text) = v["gcode"].as_str()
             {
                 app.download("job.gcode", text.as_bytes(), "text/plain");
+                app.offer_share();
             }
         } else if let Some(path) = app.pick_save("Save G-code", "job.gcode", &["gcode", "nc"])
             && app.run("file.export_gcode", json!({ "path": path })).is_some()
         {
             app.say(tr("G-code saved"));
+            app.offer_share();
         }
         ui.close();
     }
@@ -471,6 +479,7 @@ pub(crate) fn save(app: &mut LaserFoundryApp, always_ask: bool) -> bool {
             app.session.path.as_ref().and_then(|p| p.file_name()).map_or("project.laserfoundry".to_string(), |n| n.to_string_lossy().into_owned());
         app.download(&name, &bytes, "application/json");
         app.remember_project(&name, &bytes);
+        app.offer_share();
         return true;
     }
     let path = if always_ask || app.session.path.is_none() { app.pick_save("Save project", "project.laserfoundry", &["laserfoundry"]) } else { None };
@@ -480,6 +489,7 @@ pub(crate) fn save(app: &mut LaserFoundryApp, always_ask: bool) -> bool {
     }
     if app.run("file.save", params).is_some() {
         app.say(tr("Saved"));
+        app.offer_share();
         return true;
     }
     false

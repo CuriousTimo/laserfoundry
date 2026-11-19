@@ -15,6 +15,7 @@ pub(crate) mod i18n {
 }
 mod ai_ui;
 mod browser_recent;
+mod fit_test_ui;
 mod job_position;
 mod laser_presets;
 mod machine_report;
@@ -29,6 +30,7 @@ mod recovery;
 mod register_ui;
 mod select_size_ui;
 mod settings_ui;
+mod share_prompt;
 mod shortcuts;
 pub(crate) mod snap;
 mod spacing;
@@ -164,6 +166,10 @@ pub struct LaserFoundryApp {
     ring_steps: [jog_dial::Ring; jog_dial::RING_COUNT],
     /// Show the arrow pad instead of the ring dial.
     classic_pad: bool,
+    /// Hold-to-jog: a pressed direction keeps moving until it is let go (the step is then ignored).
+    jog_hold: bool,
+    /// A held jog is under way and its cancel has not been sent yet.
+    jog_held: bool,
     offset_distance: f64,
     corner_radius: f64,
     array_columns: u32,
@@ -198,6 +204,10 @@ pub struct LaserFoundryApp {
     grid_speed: (f64, f64),
     grid_power: (f64, f64),
     grid_size: f64,
+    /// Box maker inputs: inside width/depth/height, thickness, kerf, finger width (mm), lid.
+    box_size: [f64; 3],
+    box_material: [f64; 3],
+    box_lid: bool,
     array_radius: f64,
     offset_join: &'static str,
     offset_keep: bool,
@@ -221,6 +231,8 @@ pub struct LaserFoundryApp {
     /// The machine setup wizard.
     wizard: machine_setup::Wizard,
     select_size_open: bool,
+    fit_test_open: bool,
+    fit_card: fit_test_ui::FitCard,
     fonts_open: bool,
     font_manager: font_ui::FontManager,
     size_filter: select_size_ui::SizeFilter,
@@ -379,6 +391,8 @@ impl LaserFoundryApp {
             jog_step: 1.0,
             ring_steps: jog_dial::DEFAULT_RINGS,
             classic_pad: false,
+            jog_hold: false,
+            jog_held: false,
             offset_distance: 1.0,
             corner_radius: 0.0,
             array_columns: 3,
@@ -407,6 +421,9 @@ impl LaserFoundryApp {
             grid_speed: (200.0, 1200.0),
             grid_power: (10.0, 60.0),
             grid_size: 10.0,
+            box_size: [100.0, 60.0, 40.0],
+            box_material: [3.0, 0.0, 10.0],
+            box_lid: true,
             array_radius: 40.0,
             offset_join: "round",
             offset_keep: true,
@@ -426,6 +443,8 @@ impl LaserFoundryApp {
             history_open: false,
             wizard: machine_setup::Wizard::default(),
             select_size_open: false,
+            fit_test_open: false,
+            fit_card: fit_test_ui::FitCard::default(),
             fonts_open: false,
             font_manager: font_ui::FontManager::default(),
             size_filter: select_size_ui::SizeFilter::default(),
@@ -486,6 +505,7 @@ impl LaserFoundryApp {
         self.platform.set_leave_warning(self.job_active() || self.session.dirty);
         self.poll_ai(ui.ctx());
         self.poll_maker(ui.ctx());
+        self.share_prompt(ui.ctx());
         if let Some(url) = self.pending_url.take() {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
         }
@@ -935,6 +955,7 @@ impl LaserFoundryApp {
         history_ui::window(self, ctx);
         machine_setup::window(self, ctx);
         select_size_ui::window(self, ctx);
+        fit_test_ui::window(self, ctx);
         font_ui::window(self, ctx);
         if self.pending_recovery.is_some() {
             let mut choice = None;
@@ -1110,10 +1131,6 @@ impl LaserFoundryApp {
             Ok(()) => self.say(trf!("Saved template {clean}", clean = clean)),
             Err(e) => self.status = Some((trf!("Could not save the template: {e}", e = e), true)),
         }
-    }
-
-    pub(crate) fn platform_font_library_available(&self) -> bool {
-        self.platform.font_library_available()
     }
 
     pub(crate) fn platform_library_fonts(&self) -> Vec<(String, String)> {
