@@ -33,7 +33,10 @@ This design is too big for MakerFoundry (the limit is 8 MB): remove some detail 
 Type a question first.
 a batch may hold at most {MAX_BATCH} commands
 a boolean needs at least two shapes
+a box side may not be longer than 10000 mm
+a coordinate is missing, not finite or out of range, or a line or ring is too short
 a coordinate is not a finite number
+a feature has more than {limit} vertices
 a font library folder cannot be used as a fallback font
 a group needs at least two shapes
 a job is running; stop it first
@@ -52,6 +55,8 @@ an open path needs a positive offset distance (it becomes the outline around the
 at most {MAX_PRESETS} presets can be kept
 bad parameters: {0}
 batches cannot be nested
+box sizes must be finite numbers
+box sizes, material thickness and finger width must be above zero and kerf must not be negative
 cannot generate G-code: {0}
 cannot open the font {path}: {e}
 cannot plan the job: {0}
@@ -75,7 +80,9 @@ file error: {0}
 file is larger than {1} MB
 file is not a LaserFoundry document
 finish_x and finish_y must be finite numbers
+fit test card: thickness 0.5-50 mm, step 0.01-1 mm, 1-21 slots, smallest slot over 0.1 mm
 gap must be a finite number
+geometry collections nest deeper than {limit}
 give a path, or include: true to get the text
 give at least one of min_width, max_width, min_height, max_height
 give either path or data
@@ -90,6 +97,7 @@ invalid document: {0}
 job cancelled
 job contains a non-finite coordinate
 job has more than {MAX_MOVES} moves
+laser power {0}% is outside the 0–100% range
 layer {1} does not exist
 layer {1} has no sub-layer {i}
 layer {id} does not exist
@@ -105,14 +113,17 @@ machine {0} must be a positive finite number
 marks must be finite numbers
 max_s must be between 1 and 100000
 more than {MAX_FONTS} library fonts
+more than {limit} features
 no folder is available to keep the fonts in
 no path given and the document has never been saved
 no preset called {name}
 no response from the controller for {0} s
 none of the selected shapes is grouped
+not GeoJSON
 not a LaserFoundry file: {0}
 not an ASCII DXF file (binary DXF and DWG are not supported)
 not connected
+not valid JSON: {0}
 nothing in the picture is darker than the threshold
 nothing is selected
 nothing to trace
@@ -139,6 +150,7 @@ size limits cannot be negative
 size_mm must be between {1} and {2}
 sizes must be positive, finite and the shape must have extent in that direction
 spacing must be a finite number between 0 and 10
+spacing must be between 0 and 1000 mm
 start must be two finite numbers
 sub is not a sub-layer of this layer
 text height must be between {MIN_HEIGHT_MM} and {MAX_HEIGHT_MM} mm
@@ -159,6 +171,8 @@ the download was cancelled
 the drawing is too complex to import: {0}
 the file has no ENTITIES section
 the file is too large
+the file is {0} bytes; the limit is {limit}
+the fingers are too narrow for this kerf: use a wider finger width or a smaller kerf
 the font file is too large
 the font library is larger than this program will download; refusing
 the font library listing is not what was expected: {0}
@@ -193,6 +207,7 @@ this file was saved by a newer LaserFoundry (format v{0}); update to open it
 too many nodes (limit {MAX_NODES})
 too many points (limit {MAX_POINTS})
 unknown command {0}
+unsupported geometry type {0}
 width and height must be positive
 width must be positive
 {1} has no closed outline (open lines and stroke text cannot be combined)

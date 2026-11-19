@@ -146,6 +146,7 @@ fn layers(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
         let mut mode = layer.mode;
         egui::ComboBox::from_id_salt("mode")
             .selected_text(match mode {
+                _ if layer.is_multi() => tr("Multi"),
                 LayerMode::Line => tr("Line"),
                 LayerMode::Fill => tr("Fill"),
                 LayerMode::FillAndLine => tr("Fill + Line"),
@@ -224,7 +225,75 @@ fn layers(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
     if ui.checkbox(&mut air, tr("Air assist")).changed() {
         app.run("layer.set", json!({ "id": layer.id, "air_assist": air }));
     }
+    sub_layers_section(app, ui, &layer);
     presets_section(app, ui, layer.id);
+}
+
+/// Extra operations run on the same shapes after the layer's own, in list order.
+fn sub_layers_section(app: &mut LaserFoundryApp, ui: &mut egui::Ui, layer: &laserfoundry_doc::Layer) {
+    ui.collapsing(tr("Sub-layers"), |ui| {
+        let last = layer.sub_layers.len().saturating_sub(1);
+        for (i, sub) in layer.sub_layers.iter().enumerate() {
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(trf!("Sub-layer {n}", n = i + 1));
+                let mut output = sub.output;
+                if ui.checkbox(&mut output, tr("Output")).changed() {
+                    app.run("layer.set", json!({ "id": layer.id, "sub": i, "output": output }));
+                }
+                if ui.add_enabled(i > 0, egui::Button::new(tr("Earlier"))).clicked() {
+                    app.run("layer.sub_move", json!({ "id": layer.id, "sub": i, "index": i.saturating_sub(1) }));
+                }
+                if ui.add_enabled(i < last, egui::Button::new(tr("Later"))).clicked() {
+                    app.run("layer.sub_move", json!({ "id": layer.id, "sub": i, "index": i + 1 }));
+                }
+                if ui.button(tr("Remove")).clicked() {
+                    app.run("layer.sub_remove", json!({ "id": layer.id, "sub": i }));
+                }
+            });
+            egui::Grid::new(("sub_layer_settings", layer.id, i)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                ui.label(tr("Mode"));
+                let mut mode = sub.mode;
+                egui::ComboBox::from_id_salt(("sub_mode", layer.id, i))
+                    .selected_text(match mode {
+                        LayerMode::Line => tr("Line"),
+                        LayerMode::Fill => tr("Fill"),
+                        LayerMode::FillAndLine => tr("Fill + Line"),
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut mode, LayerMode::Line, tr("Line"));
+                        ui.selectable_value(&mut mode, LayerMode::Fill, tr("Fill"));
+                        ui.selectable_value(&mut mode, LayerMode::FillAndLine, tr("Fill + Line"));
+                    });
+                if mode != sub.mode {
+                    app.run("layer.set", json!({ "id": layer.id, "sub": i, "mode": mode }));
+                }
+                ui.end_row();
+                for (label, key, value, range, suffix) in [
+                    ("Speed", "speed", sub.speed, 1.0..=100_000.0, " mm/min"),
+                    ("Max power", "max_power", sub.max_power, 0.0..=100.0, " %"),
+                    ("Min power", "min_power", sub.min_power, 0.0..=100.0, " %"),
+                    ("Interval", "interval", sub.interval, 0.005..=10.0, " mm"),
+                ] {
+                    ui.label(tr(label));
+                    if let Some(v) = number(ui, value, range, suffix) {
+                        app.run("layer.set", json!({ "id": layer.id, "sub": i, key: v }));
+                    }
+                    ui.end_row();
+                }
+                ui.label(tr("Passes"));
+                let mut passes = sub.passes;
+                let r = ui.add(egui::DragValue::new(&mut passes).range(1..=1000));
+                if committed(&r) && passes != sub.passes {
+                    app.run("layer.set", json!({ "id": layer.id, "sub": i, "passes": passes }));
+                }
+                ui.end_row();
+            });
+        }
+        if ui.button(tr("Add sub-layer")).on_hover_text(tr("Run another operation on this layer's shapes after it")).clicked() {
+            app.run("layer.sub_add", json!({ "id": layer.id }));
+        }
+    });
 }
 
 /// Named cut settings kept in the project: apply one to this layer, or save this layer's as one.
@@ -442,6 +511,7 @@ fn laser(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
     crate::register_ui::section(app, ui);
     cut_order(app, ui);
     test_grid_section(app, ui);
+    box_maker_section(app, ui);
     ui.separator();
     job_controls(app, ui);
     if app.link.is_some() {
@@ -802,6 +872,11 @@ fn jog_pad(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
                 ui.add(egui::DragValue::new(&mut app.jog_feed).range(10.0..=30_000.0).suffix(" mm/min"));
             });
         }
+        ui.checkbox(&mut app.jog_hold, tr("Hold to jog"))
+            .on_hover_text(tr("Keep moving while a direction is held and stop when it is let go (speed capped at 3000 mm/min)"));
+        if !app.jog_hold {
+            crate::jog_dial::hold_jog(app, None);
+        }
         let mut here = app.move_head_mode;
         if ui.checkbox(&mut here, tr("Click the canvas to move the laser there")).changed() {
             app.move_head_mode = here;
@@ -816,11 +891,17 @@ fn jog_pad(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
         let rows: [[Option<(f64, f64)>; 3]; 3] =
             [[None, Some((0.0, -1.0)), None], [Some((-1.0, 0.0)), None, Some((1.0, 0.0))], [None, Some((0.0, 1.0)), None]];
         if app.classic_pad {
+            let mut held = None;
             egui::Grid::new("jog_grid").spacing([2.0, 2.0]).show(ui, |ui| {
                 for cells in rows {
                     for cell in cells {
                         if let Some((wx, wy)) = cell {
-                            if arrow_button(ui, wx, wy).clicked() {
+                            let resp = arrow_button(ui, wx, wy);
+                            if app.jog_hold {
+                                if resp.is_pointer_button_down_on() {
+                                    held = Some(((wx, wy), app.jog_feed));
+                                }
+                            } else if resp.clicked() {
                                 jog(app, wx, wy);
                             }
                         } else {
@@ -830,6 +911,9 @@ fn jog_pad(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
                     ui.end_row();
                 }
             });
+            if app.jog_hold {
+                crate::jog_dial::hold_jog(app, held);
+            }
         } else {
             crate::jog_dial::show(app, ui);
         }
@@ -1001,28 +1085,12 @@ fn text_properties(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
             app.run("text.edit", json!({ "id": id, "font": "" }));
             app.text_buffer = None;
         }
-        if app.platform_font_library_available() {
-            let mut chosen = None;
-            egui::ComboBox::from_id_salt("library_font").selected_text(tr("Library fonts")).show_ui(ui, |ui| {
-                let fonts = app.platform_library_fonts();
-                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-                    for (name, value) in &fonts {
-                        if ui.button(name).clicked() {
-                            chosen = Some(value.clone());
-                            ui.close();
-                        }
-                    }
-                });
-                if fonts.is_empty() {
-                    ui.weak(tr("None downloaded yet: View > Font library"));
-                }
-            });
-            if let Some(font) = chosen
-                && let Some(v) = app.run("text.edit", json!({ "id": id, "font": font }))
-            {
-                app.note_unsupported(&v);
-                app.text_buffer = None;
-            }
+        let current = style.font.clone().unwrap_or_default();
+        if let Some(font) = crate::font_ui::picker(app, ui, "font_picker", &current, &content)
+            && let Some(v) = app.run("text.edit", json!({ "id": id, "font": font }))
+        {
+            app.note_unsupported(&v);
+            app.text_buffer = None;
         }
     });
     if style.font.is_some() {
@@ -1253,14 +1321,19 @@ pub(crate) fn nest_selection(app: &mut LaserFoundryApp) {
     let placed = result["placed"].as_u64().unwrap_or(0);
     let left = result["unplaced"].as_array().map_or(0, Vec::len);
     let sheets = result["per_sheet"].as_array().map_or(1, Vec::len);
-    app.say(match (sheets > 1, left == 0) {
-        (false, true) => trf!("Placed {placed} in the bed", placed = placed),
-        (false, false) => trf!("Placed {placed}; {left} did not fit and are selected", placed = placed, left = left),
-        (true, true) => trf!("Placed {placed} on {sheets} sheets", placed = placed, sheets = sheets),
-        (true, false) => {
-            trf!("Placed {placed} on {sheets} sheets; {left} did not fit and are selected", placed = placed, sheets = sheets, left = left)
-        }
-    });
+    let head = match sheets > 1 {
+        false if left == 0 => trf!("Placed {placed} in the bed", placed = placed),
+        false => trf!("Placed {placed}", placed = placed),
+        true => trf!("Placed {placed} on {sheets} sheets", placed = placed, sheets = sheets),
+    };
+    // How much of the sheet the parts cover (holes not counted); left out when nothing was placed.
+    let used = match result["used_percent"].as_f64().filter(|p| p.is_finite() && placed > 0) {
+        Some(percent) if sheets > 1 => trf!(", {percent}% of the sheets used", percent = format!("{percent:.0}")),
+        Some(percent) => trf!(", {percent}% of the sheet used", percent = format!("{percent:.0}")),
+        None => String::new(),
+    };
+    let tail = if left == 0 { String::new() } else { trf!("; {left} did not fit and are selected", left = left) };
+    app.say(format!("{head}{used}{tail}"));
 }
 
 /// Per-shape cut settings that replace the layer's.
@@ -1347,6 +1420,30 @@ fn test_grid_section(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
                 "speed_min": app.grid_speed.0, "speed_max": app.grid_speed.1, "power_min": app.grid_power.0, "power_max": app.grid_power.1,
             });
             app.run("generate.test_grid", params);
+        }
+    });
+}
+
+/// Finger-jointed box panels as cut paths.
+fn box_maker_section(app: &mut LaserFoundryApp, ui: &mut egui::Ui) {
+    ui.collapsing(tr("Box maker"), |ui| {
+        ui.horizontal(|ui| {
+            for (v, prefix) in app.box_size.iter_mut().zip(["width ", "depth ", "height "]) {
+                ui.add(egui::DragValue::new(v).range(1.0..=2000.0).prefix(prefix));
+            }
+        });
+        ui.horizontal(|ui| {
+            for (v, prefix) in app.box_material.iter_mut().zip(["thickness ", "kerf ", "finger "]) {
+                ui.add(egui::DragValue::new(v).range(0.0..=100.0).speed(0.05).prefix(prefix));
+            }
+        });
+        ui.checkbox(&mut app.box_lid, tr("Lid"));
+        if ui.button(tr("Create on the active layer")).on_hover_text(tr("Inside size in mm; panels are laid out with a gap")).clicked() {
+            let params = json!({
+                "width": app.box_size[0], "depth": app.box_size[1], "height": app.box_size[2], "thickness": app.box_material[0],
+                "kerf": app.box_material[1], "finger": app.box_material[2], "lid": app.box_lid, "layer": app.active_layer,
+            });
+            app.run("generate.box", params);
         }
     });
 }
