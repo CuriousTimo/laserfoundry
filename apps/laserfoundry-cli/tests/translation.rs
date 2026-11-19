@@ -48,7 +48,10 @@ mod catalog_tests {
     #[test]
     fn the_desktop_apps_catalog_is_used_when_nothing_else_is_named() {
         let dir = temp_dir("default");
-        let home = dir.join("LaserFoundry");
+        // The per-user data folder as `laserfoundry_i18n::default_file` finds it with `cli`'s environment
+        // (HOME, XDG_DATA_HOME and APPDATA all point at `dir`): `~/Library/Application Support` on macOS.
+        let data = if cfg!(target_os = "macos") { dir.join("Library").join("Application Support") } else { dir.clone() };
+        let home = data.join("LaserFoundry");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("translation.json"), r#"{"strings":{"error: {message}":"Fehler: {message}"}}"#).unwrap();
         let out = cli(&dir, &["bogus"]);
