@@ -31,6 +31,7 @@ mod recovery;
 mod register_ui;
 mod select_size_ui;
 mod settings_ui;
+mod share_prompt;
 mod shortcuts;
 pub(crate) mod snap;
 mod spacing;
@@ -508,6 +509,7 @@ impl LaserFoundryApp {
         self.poll_ai(ui.ctx());
         self.poll_maker(ui.ctx());
         self.poll_hub(ui.ctx());
+        self.share_prompt(ui.ctx());
         if let Some(url) = self.pending_url.take() {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
         }
@@ -1134,10 +1136,6 @@ impl LaserFoundryApp {
             Ok(()) => self.say(trf!("Saved template {clean}", clean = clean)),
             Err(e) => self.status = Some((trf!("Could not save the template: {e}", e = e), true)),
         }
-    }
-
-    pub(crate) fn platform_font_library_available(&self) -> bool {
-        self.platform.font_library_available()
     }
 
     pub(crate) fn platform_library_fonts(&self) -> Vec<(String, String)> {
