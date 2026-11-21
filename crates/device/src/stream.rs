@@ -79,22 +79,37 @@ impl JobStream {
         !self.in_flight.is_empty()
     }
 
-    /// Sends as many lines as fit in the controller's RX buffer.
+    /// Sends as many lines as fit in the controller's RX buffer, in one write: a serial port
+    /// drains its output on every write, so one write per line would wait out each line in turn.
     pub(crate) fn pump(&mut self, transport: &mut dyn Transport) -> Result<(), DeviceError> {
-        while let Some(line) = self.lines.get(self.next) {
+        let mut batch = Vec::new();
+        let mut next = self.next;
+        let mut in_flight_bytes = self.in_flight_bytes;
+        let mut in_flight = self.in_flight.len();
+        while let Some(line) = self.lines.get(next) {
             let cost = line.len() + 1;
             let full = match self.window {
-                Window::Bytes(size) => self.in_flight_bytes + cost > size.saturating_sub(1),
-                Window::Lines(n) => self.in_flight.len() >= n.max(1),
+                Window::Bytes(size) => in_flight_bytes + cost > size.saturating_sub(1),
+                Window::Lines(n) => in_flight >= n.max(1),
             };
             if full {
                 break;
             }
-            transport.write_all(format!("{line}\n").as_bytes())?;
-            self.in_flight.push_back(cost);
-            self.in_flight_bytes += cost;
-            self.next += 1;
+            batch.extend_from_slice(line.as_bytes());
+            batch.push(b'\n');
+            in_flight_bytes += cost;
+            in_flight += 1;
+            next += 1;
         }
+        if batch.is_empty() {
+            return Ok(());
+        }
+        transport.write_all(&batch)?;
+        for line in &self.lines[self.next..next] {
+            self.in_flight.push_back(line.len() + 1);
+        }
+        self.in_flight_bytes = in_flight_bytes;
+        self.next = next;
         Ok(())
     }
 
@@ -302,6 +317,38 @@ mod tests {
             assert_eq!(sim.received().len(), 500);
             assert!(sim.max_buffer_used() <= GRBL_RX_BUFFER, "buffer peaked at {}", sim.max_buffer_used());
             assert!(sim.max_buffer_used() > 80, "should actually pipeline, peaked at {}", sim.max_buffer_used());
+        }
+
+        #[test]
+        fn one_pump_fills_the_rx_buffer_with_a_single_write() {
+            /// Takes every write, remembering each one apart.
+            struct Writes(Vec<Vec<u8>>);
+            impl Transport for Writes {
+                fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+                    self.0.push(bytes.to_vec());
+                    Ok(())
+                }
+
+                fn read_line(&mut self, _: Duration) -> std::io::Result<Option<String>> {
+                    Ok(None)
+                }
+            }
+            let mut job = JobStream::new(&program(50)).unwrap();
+            let mut writes = Writes(Vec::new());
+            job.pump(&mut writes).unwrap();
+            assert_eq!(writes.0.len(), 1, "the lines that fit go out together");
+            let sent = &writes.0[0];
+            assert!(sent.len() < GRBL_RX_BUFFER, "{} bytes do not fit", sent.len());
+            assert_eq!(sent.iter().filter(|&&b| b == b'\n').count(), job.progress().sent);
+            assert!(job.progress().sent > 1);
+            // A full buffer sends nothing more until an acknowledgement frees room.
+            job.pump(&mut writes).unwrap();
+            assert_eq!(writes.0.len(), 1);
+            assert!(job.on_response("ok").unwrap());
+            job.pump(&mut writes).unwrap();
+            assert_eq!(writes.0.len(), 2);
+            assert!(writes.0[1].ends_with(b"\n"), "only whole lines are written");
+            assert!(job.in_flight_bytes < GRBL_RX_BUFFER);
         }
 
         #[test]
