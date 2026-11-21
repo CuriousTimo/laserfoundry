@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use crate::{GRBL_RX_BUFFER, Transport, realtime};
 
-/// An in-memory GRBL. It models the 128-byte RX buffer (so over-sending is detectable) and answers
-/// one buffered line per poll, which makes the streamer actually pipeline lines.
+/// An in-memory GRBL. It models the RX buffer (128 bytes unless [`SimulatedGrbl::set_rx_buffer`] says otherwise, so over-sending
+/// is detectable) and answers one buffered line per poll, which makes the streamer actually pipeline lines.
 #[derive(Debug, Default)]
 pub struct SimulatedGrbl {
     pending: VecDeque<String>,
@@ -33,11 +33,22 @@ pub struct SimulatedGrbl {
     /// Report an alarm state in status reports once any motion line has been accepted.
     alarm_when_busy: bool,
     busy_until_reset: bool,
+    /// RX buffer size in bytes; 0 means GRBL's 128.
+    rx_buffer: usize,
 }
 
 impl SimulatedGrbl {
     pub fn new() -> Self {
         SimulatedGrbl { settings: default_settings(), ..Self::default() }
+    }
+
+    /// Models a controller with an RX buffer of `bytes`, which it reports in `$I`'s `[OPT:...]` line.
+    pub fn set_rx_buffer(&mut self, bytes: usize) {
+        self.rx_buffer = bytes;
+    }
+
+    fn rx_capacity(&self) -> usize {
+        if self.rx_buffer == 0 { GRBL_RX_BUFFER } else { self.rx_buffer }
     }
 
     /// After the first accepted line, status reports say `Alarm` (a limit switch tripping mid-job).
@@ -142,6 +153,12 @@ impl SimulatedGrbl {
             Some(rest) => (rest.to_string(), true),
             None => (upper.clone(), false),
         };
+        if upper == "$I" {
+            // GRBL 1.1's build info: version, then the option codes, block buffer size and RX buffer size.
+            self.responses.push_back("[VER:1.1h.20190825:]".into());
+            self.responses.push_back(format!("[OPT:V,15,{}]", self.rx_capacity()));
+            return;
+        }
         if upper == "$$" {
             for (id, value) in &self.settings {
                 self.responses.push_back(format!("${id}={value}"));
@@ -241,7 +258,7 @@ impl Transport for SimulatedGrbl {
                 self.partial.push(char::from(b));
             }
             self.max_used = self.max_used.max(self.pending_bytes + self.partial.len());
-            if self.pending_bytes + self.partial.len() > GRBL_RX_BUFFER {
+            if self.pending_bytes + self.partial.len() > self.rx_capacity() {
                 self.overrun = true;
             }
         }

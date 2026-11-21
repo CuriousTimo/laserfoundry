@@ -93,9 +93,84 @@ pub fn parse_marlin_position(line: &str) -> Option<(f64, f64, f64)> {
     Some((axis("X:")?, axis("Y:")?, axis("Z:").unwrap_or(0.0)))
 }
 
+/// What GRBL's `[OPT:...]` line (the second line of its `$I` answer) says about its buffers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildOptions {
+    /// The planner's block buffer size.
+    pub blocks: usize,
+    /// The serial RX buffer size, in bytes: what character counting may fill.
+    pub rx_buffer: usize,
+}
+
+/// Longest `[OPT:...]` line looked at (a real one is about 30 bytes).
+const MAX_OPT_LINE: usize = 128;
+/// Largest RX buffer believed. A controller may report a larger buffer than GRBL's 128 bytes, but not an absurd one.
+pub const MAX_RX_BUFFER: usize = 65_536;
+/// Largest block buffer believed.
+const MAX_BLOCKS: usize = 1024;
+
+/// Parses GRBL 1.1's build options, `[OPT:VL,15,128]`: the option codes, then "the value after the first comma contains the
+/// `blockBufferSize`, as int. The value after the second comma contains the `rxBufferSize`, as int."
+/// (<https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface>, "[VER:] and [OPT:]"). Values after those two are ignored. `None`
+/// for any other line, or when a size is missing, not a number, or outside what a real controller could have: an RX buffer
+/// smaller than the longest line the streamer sends (79 bytes and its newline) or larger than [`MAX_RX_BUFFER`].
+pub fn parse_build_options(line: &str) -> Option<BuildOptions> {
+    let line = line.trim();
+    if line.len() > MAX_OPT_LINE {
+        return None;
+    }
+    let inner = line.strip_prefix("[OPT:")?.strip_suffix(']')?;
+    let mut fields = inner.split(',');
+    let _codes = fields.next()?;
+    let blocks = fields.next()?.trim().parse::<usize>().ok().filter(|b| (1..=MAX_BLOCKS).contains(b))?;
+    let rx_buffer = fields.next()?.trim().parse::<usize>().ok().filter(|r| (crate::stream::MAX_LINE_BYTES + 1..=MAX_RX_BUFFER).contains(r))?;
+    Some(BuildOptions { blocks, rx_buffer })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod build_options {
+        use super::*;
+
+        #[test]
+        fn reads_the_two_sizes_after_the_codes() {
+            // The wiki's own examples.
+            assert_eq!(parse_build_options("[OPT:VL,15,128]"), Some(BuildOptions { blocks: 15, rx_buffer: 128 }));
+            assert_eq!(parse_build_options("[OPT:,15,128]"), Some(BuildOptions { blocks: 15, rx_buffer: 128 }));
+            // A controller with a larger buffer and a field after the two sizes (read from a real one).
+            assert_eq!(parse_build_options("[OPT:VNMZHSL,35,7680,3]\r"), Some(BuildOptions { blocks: 35, rx_buffer: 7680 }));
+        }
+
+        #[test]
+        fn refuses_anything_a_real_controller_could_not_mean() {
+            for bad in [
+                "",
+                "ok",
+                "[VER:1.1h.20190825:]",
+                "[OPT:VL]",
+                "[OPT:VL,15]",
+                "[OPT:VL,15,128",
+                "OPT:VL,15,128]",
+                "[OPT:VL,x,128]",
+                "[OPT:VL,15,-128]",
+                "[OPT:VL,15,1e3]",
+                "[OPT:VL,0,128]",
+                "[OPT:VL,15,0]",
+                "[OPT:VL,15,79]",
+                "[OPT:VL,15,65537]",
+                "[OPT:VL,15,99999999999999999999999]",
+                "[OPT:VL,2000,128]",
+            ] {
+                assert_eq!(parse_build_options(bad), None, "{bad:?}");
+            }
+            assert_eq!(parse_build_options("[OPT:VL,15,80]").map(|o| o.rx_buffer), Some(80), "one line fits");
+            assert_eq!(parse_build_options("[OPT:VL,15,65536]").map(|o| o.rx_buffer), Some(MAX_RX_BUFFER));
+            let long = format!("[OPT:{},15,128]", "V".repeat(200));
+            assert_eq!(parse_build_options(&long), None, "an overlong line is not looked at");
+        }
+    }
 
     #[test]
     fn work_positions_are_flagged_because_they_cannot_be_placed_on_the_bed() {

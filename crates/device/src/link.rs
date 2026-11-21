@@ -186,6 +186,14 @@ impl Link {
         self.send_line("$$")
     }
 
+    /// `$I`: ask the controller for its build info. Its `[OPT:...]` line gives the RX buffer size, which character counting then
+    /// fills for the jobs started after it (<https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface>, "[VER:] and [OPT:]");
+    /// until then, and when the line is missing or not believable, GRBL's 128 bytes. GRBL only.
+    pub fn request_build_info(&self) -> Result<(), LinkError> {
+        self.require_grbl("build info")?;
+        self.send_line("$I")
+    }
+
     /// Changes one controller setting (`$id=value`) and asks for the settings again. GRBL only.
     pub fn write_setting(&self, id: u32, value: f64) -> Result<(), LinkError> {
         self.require_grbl("settings")?;
@@ -391,6 +399,8 @@ struct Worker {
     finishing: bool,
     last_status_request: Instant,
     last_activity: Instant,
+    /// The RX buffer a job's character counting fills: GRBL's 128 bytes until the controller's `[OPT:...]` line says otherwise.
+    rx_buffer: usize,
 }
 
 impl Worker {
@@ -407,6 +417,7 @@ impl Worker {
             finishing: false,
             last_status_request: now - STATUS_INTERVAL,
             last_activity: now,
+            rx_buffer: crate::GRBL_RX_BUFFER,
         }
     }
 
@@ -517,7 +528,7 @@ impl Worker {
                     self.log("! a job is already running");
                 } else {
                     let window = match self.protocol {
-                        Protocol::Grbl => Window::Bytes,
+                        Protocol::Grbl => Window::Bytes(self.rx_buffer),
                         // Marlin acknowledges a line once it is queued and tells the host nothing about free buffer space,
                         // so one line at a time is the only flow control there is.
                         Protocol::Marlin => Window::Lines(1),
@@ -696,6 +707,14 @@ impl Worker {
             }
             return Ok(());
         }
+        if let Some(options) = crate::parse_build_options(line) {
+            self.log(format!("< {line}"));
+            if options.rx_buffer != self.rx_buffer {
+                self.rx_buffer = options.rx_buffer;
+                self.log(format!("the controller's RX buffer is {} bytes: jobs started from now fill that much", options.rx_buffer));
+            }
+            return Ok(());
+        }
         if let Some((id, value)) = settings::parse_setting(line) {
             self.update(|s| {
                 if s.settings.len() < settings::MAX_SETTINGS || s.settings.contains_key(&id) {
@@ -856,6 +875,82 @@ mod tests {
 
     fn long_program(lines: usize) -> String {
         (0..lines).map(|i| format!("G1 X{} Y{} F1000\n", i % 100, i % 50)).collect()
+    }
+
+    mod rx_buffer_tests {
+        use std::sync::{Arc, Mutex};
+
+        use super::*;
+        use crate::GRBL_RX_BUFFER;
+
+        #[test]
+        fn a_job_fills_the_rx_buffer_the_controller_reports() {
+            let (link, sim) = shared_sim(7680);
+            link.request_build_info().unwrap();
+            wait_for(&link, "the reported buffer", |s| s.console.iter().any(|l| l.contains("RX buffer is 7680 bytes")));
+            run_job(&link, 2000);
+            let sim = sim.lock().unwrap();
+            assert!(!sim.overran_buffer(), "never more than the controller holds");
+            assert!(sim.max_buffer_used() > 4 * GRBL_RX_BUFFER, "the larger buffer is used: peak {}", sim.max_buffer_used());
+            assert!(sim.max_buffer_used() <= 7680);
+            assert_eq!(sim.received().iter().filter(|l| l.starts_with("G1")).count(), 2000);
+        }
+
+        #[test]
+        fn until_the_controller_says_otherwise_a_job_keeps_to_128_bytes() {
+            let (link, sim) = shared_sim(7680);
+            run_job(&link, 500);
+            let sim = sim.lock().unwrap();
+            assert!(sim.max_buffer_used() <= GRBL_RX_BUFFER, "peak {}", sim.max_buffer_used());
+        }
+
+        #[test]
+        fn a_smaller_reported_buffer_is_kept_to() {
+            let (link, sim) = shared_sim(100);
+            link.request_build_info().unwrap();
+            wait_for(&link, "the reported buffer", |s| s.console.iter().any(|l| l.contains("RX buffer is 100 bytes")));
+            run_job(&link, 500);
+            let sim = sim.lock().unwrap();
+            assert!(!sim.overran_buffer(), "peak {}", sim.max_buffer_used());
+            assert!(sim.max_buffer_used() <= 100);
+        }
+
+        #[test]
+        fn build_info_is_grbl_only() {
+            let link = Link::connect_with(Box::new(crate::SimulatedMarlin::new()), Protocol::Marlin);
+            assert!(matches!(link.request_build_info(), Err(LinkError::Rejected(_))));
+        }
+
+        fn run_job(link: &Link, lines: usize) {
+            link.start_job(long_program(lines)).unwrap();
+            let s = wait_for(link, "the job to finish", |s| matches!(s.job, JobState::Finished(_)));
+            assert_eq!(s.job, JobState::Finished(Ok(lines)), "{:?}", s.console);
+        }
+
+        /// A simulator the test can still look at while the link owns it.
+        fn shared_sim(rx_buffer: usize) -> (Link, Arc<Mutex<SimulatedGrbl>>) {
+            let mut sim = SimulatedGrbl::new();
+            sim.set_rx_buffer(rx_buffer);
+            sim.set_non_blocking(true);
+            let sim = Arc::new(Mutex::new(sim));
+            (Link::connect(Box::new(SharedSim(sim.clone()))), sim)
+        }
+
+        struct SharedSim(Arc<Mutex<SimulatedGrbl>>);
+
+        impl Transport for SharedSim {
+            fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+                self.0.lock().map_err(|_| io::Error::other("poisoned"))?.write_all(bytes)
+            }
+
+            fn read_line(&mut self, timeout: Duration) -> io::Result<Option<String>> {
+                let line = self.0.lock().map_err(|_| io::Error::other("poisoned"))?.read_line(timeout)?;
+                if line.is_none() {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Ok(line)
+            }
+        }
     }
 
     mod immediate_tests {
