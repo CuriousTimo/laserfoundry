@@ -20,7 +20,7 @@ pub use codes::{alarm_hint, alarm_text, error_hint, error_text};
 pub use link::{CONSOLE_LIMIT, JobState, Link, LinkError, MAX_FEED, MAX_JOG_MM, MAX_TRAVEL_MM, Snapshot, jog_line, jog_to_line};
 pub use sim::SimulatedGrbl;
 pub use sim_marlin::SimulatedMarlin;
-pub use status::{MachineState, Status, parse_marlin_position, parse_status};
+pub use status::{BuildOptions, MAX_RX_BUFFER, MachineState, Status, parse_build_options, parse_marlin_position, parse_status};
 pub use stream::{Progress, RESTART_BACKUP_LINES, StreamOptions, StreamReport, restart_line, stream_program};
 
 use std::io;
@@ -28,7 +28,9 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-/// GRBL's serial RX buffer, in bytes.
+/// GRBL's serial RX buffer, in bytes ("Grbl has a 128 character serial receive buffer",
+/// <https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface>): what character counting fills until the controller reports its
+/// own size in `$I` ([`parse_build_options`]).
 pub const GRBL_RX_BUFFER: usize = 128;
 
 /// Which firmware family a [`Link`] talks to. Smoothieware speaks GRBL's protocol (single-byte real-time commands, `?` status

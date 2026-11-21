@@ -1416,8 +1416,10 @@ impl LaserFoundryApp {
             return;
         }
         if !self.settings_asked && snap.status.is_some() {
-            // Once the controller answers, learn its settings: a job is refused when laser mode is off.
+            // Once the controller answers, learn its settings (a job is refused when laser mode is off) and, from its build
+            // info, the size of its RX buffer (a job's character counting fills it).
             self.settings_asked = true;
+            let _ = link.request_build_info();
             let _ = link.request_settings();
         }
         if self.last_job.as_ref() != Some(&snap.job) {

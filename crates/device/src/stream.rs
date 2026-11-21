@@ -38,8 +38,8 @@ pub struct StreamReport {
 /// How many lines the streamer may have outstanding at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Window {
-    /// As many as fit GRBL's RX buffer (character counting).
-    Bytes,
+    /// As many as fit an RX buffer of this many bytes (character counting).
+    Bytes(usize),
     /// At most this many, however short (a firmware with no way to count free buffer space).
     Lines(usize),
 }
@@ -59,7 +59,7 @@ pub(crate) struct JobStream {
 
 impl JobStream {
     pub(crate) fn new(program: &str) -> Result<Self, DeviceError> {
-        Self::with_window(program, Window::Bytes)
+        Self::with_window(program, Window::Bytes(GRBL_RX_BUFFER))
     }
 
     pub(crate) fn with_window(program: &str, window: Window) -> Result<Self, DeviceError> {
@@ -84,7 +84,7 @@ impl JobStream {
         while let Some(line) = self.lines.get(self.next) {
             let cost = line.len() + 1;
             let full = match self.window {
-                Window::Bytes => self.in_flight_bytes + cost > GRBL_RX_BUFFER - 1,
+                Window::Bytes(size) => self.in_flight_bytes + cost > size.saturating_sub(1),
                 Window::Lines(n) => self.in_flight.len() >= n.max(1),
             };
             if full {

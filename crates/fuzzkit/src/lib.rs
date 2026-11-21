@@ -45,6 +45,7 @@ pub fn controller_line(data: &[u8]) {
     for line in text.lines() {
         let _ = laserfoundry_device::parse_status(line);
         let _ = laserfoundry_device::parse_marlin_position(line);
+        let _ = laserfoundry_device::parse_build_options(line);
         let _ = laserfoundry_device::settings::parse_setting(line);
     }
     // The same lines as a controller's whole side of a conversation, for each protocol, while a job runs and then stops.
