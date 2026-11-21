@@ -1,8 +1,9 @@
 {
-  "note": "Bed sizes and optical power as each maker publishes them on its own product page (read 2026-11-08). Model names are here only to say what the program works with. Nothing here was tested on the machines. A value a maker's page did not state, or stated two different ways, is left out.",
+  "note": "Bed sizes and optical power as each maker publishes them on its own product page (read 2026-11-08; the Ortur Laser Master 2 Pro S2 on 2026-11-17). Model names are here only to say what the program works with. Nothing here was tested on the machines. A value a maker's page did not state, or stated two different ways, is left out.",
   "presets": [
     { "name": "xTool D1 Pro 10W", "bed_width": 430, "bed_height": 400, "optical_watts": 10, "source": "https://au.xtool.com/products/xtool-d1-pro-desktop-laser-engraver-cutting-machine" },
     { "name": "Creality Falcon2 22W", "bed_width": 400, "bed_height": 415, "optical_watts": 22, "source": "https://www.creality.com/products/creality-falcon2-22w" },
+    { "name": "Ortur Laser Master 2 Pro S2 (10W module)", "bed_width": 400, "bed_height": 400, "optical_watts": 10, "source": "https://eu.orturlaser.com/products/ortur-laser-master-2-lm2-pro-s2" },
     { "name": "Ortur Laser Master 3 (10W module)", "bed_width": 400, "bed_height": 400, "optical_watts": 10, "source": "https://ortur.net/products/ortur-laser-master-3-engraver-cutter-machine" },
     { "name": "Ortur Laser Master 3 LE 5W", "bed_width": 400, "bed_height": 400, "optical_watts": 5, "source": "https://ortur.net/products/ortur-laser-master-3-lite" },
     { "name": "Sculpfun S9", "bed_width": 410, "bed_height": 415, "source": "https://eu.sculpfun.com/en-eu/products/sculpfun-s9-laser-engraver" },

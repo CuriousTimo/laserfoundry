@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-ai"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-camera"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1048,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-device"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "log",
  "thiserror 2.0.21",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-doc"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "kurbo",
  "laserfoundry-geom",
@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-dxf"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "kurbo",
  "laserfoundry-doc",
@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-engine"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "image",
  "kurbo",
@@ -1100,7 +1100,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-fontlib"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "log",
  "serde_json",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-format"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "laserfoundry-doc",
  "serde",
@@ -1128,7 +1128,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-fuzzkit"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "laserfoundry-ai",
  "laserfoundry-camera",
@@ -1148,7 +1148,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-gcode"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "laserfoundry-doc",
  "laserfoundry-geom",
@@ -1158,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-geom"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "kurbo",
  "serde",
@@ -1167,14 +1167,14 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-i18n"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "laserfoundry-map"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -1182,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-mcp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "getrandom 0.4.3",
  "laserfoundry-engine",
@@ -1192,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-nest"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "laserfoundry-geom",
  "thiserror 2.0.21",
@@ -1200,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-pathops"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "i_overlay",
  "laserfoundry-geom",
@@ -1209,32 +1209,33 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-svg"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "kurbo",
  "laserfoundry-doc",
  "laserfoundry-geom",
+ "roxmltree 0.21.2",
  "thiserror 2.0.21",
  "usvg",
 ]
 
 [[package]]
 name = "laserfoundry-text"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "harfrust 0.15.0",
  "kurbo",
  "laserfoundry-geom",
  "roxmltree 0.21.2",
  "serde_json",
- "skrifa 0.49.0",
+ "skrifa 0.50.0",
  "thiserror 2.0.21",
  "unicode-bidi",
 ]
 
 [[package]]
 name = "laserfoundry-toolpath"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "kurbo",
  "laserfoundry-doc",
@@ -1245,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-ui-egui"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "egui",
  "kurbo",
@@ -1264,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "laserfoundry-web"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "eframe",
  "js-sys",
@@ -1949,6 +1950,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "read-fonts"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a39d2f8f681030a7bcbbcf3e8568775ac2393afd51401a2e2133ee89e3953897"
+dependencies = [
+ "bytemuck",
+ "foldhash",
+ "font-types",
+ "once_cell",
+ "smallvec",
+ "yoke",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2223,6 +2238,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "skrifa"
+version = "0.50.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e85ba678a6023a063d0a78c8770f1c166674ef46af13523d05eff67430f79dfe"
+dependencies = [
+ "bytemuck",
+ "once_cell",
+ "read-fonts 0.47.0",
+ "smallvec",
+ "yoke",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2284,9 +2312,9 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "svgtypes"
-version = "0.16.1"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "695b5790b3131dafa99b3bbfd25a216edb3d216dad9ca208d4657bfb8f2abc3d"
+checksum = "9f12b12995e3638c70618c1facb1ce65302f6a6f706b675f07c58a5d7391120e"
 dependencies = [
  "kurbo",
  "siphasher",
@@ -2516,15 +2544,15 @@ dependencies = [
 
 [[package]]
 name = "usvg"
-version = "0.49.0"
+version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d09b73ee83641d390ad7ffd9000f347b16eb128e437675b6ff277ea5c7fcf22c"
+checksum = "bdb896f04730b97805bbc3191fc57e4bf03face0f14577dd42e783c4d8c98802"
 dependencies = [
  "base64",
  "data-url",
  "flate2",
  "fontdb",
- "harfrust 0.12.0",
+ "harfrust 0.15.0",
  "imagesize",
  "kurbo",
  "log",
@@ -2532,7 +2560,7 @@ dependencies = [
  "roxmltree 0.21.2",
  "simplecss",
  "siphasher",
- "skrifa 0.44.0",
+ "skrifa 0.49.0",
  "strict-num",
  "svgtypes",
  "tiny-skia-path",
