@@ -188,7 +188,7 @@ impl Link {
 
     /// `$I`: ask the controller for its build info. Its `[OPT:...]` line gives the RX buffer size, which character counting then
     /// fills for the jobs started after it (<https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface>, "[VER:] and [OPT:]");
-    /// until then, and when the line is missing or not believable, GRBL's 128 bytes. GRBL only.
+    /// until then, and when the line is missing, GRBL's 128 bytes. GRBL only.
     pub fn request_build_info(&self) -> Result<(), LinkError> {
         self.require_grbl("build info")?;
         self.send_line("$I")
