@@ -3819,7 +3819,12 @@ mod setup_tests {
             sim.set_setting(*id, value);
         }
         h.app.start_link(Ok(Box::new(sim)));
-        pump(&mut h, "the controller's settings", |h| h.app.snap.as_ref().is_some_and(|s| !s.settings.is_empty()));
+        // Every setting given to the simulator, not just the first that arrives: the `$$` answer comes line by line.
+        // Only finite numbers: `parse_setting` drops any other value, so those never arrive.
+        let kept: Vec<u32> = settings.iter().filter(|(_, v)| v.parse::<f64>().is_ok_and(f64::is_finite)).map(|(id, _)| *id).collect();
+        pump(&mut h, "the controller's settings", |h| {
+            h.app.snap.as_ref().is_some_and(|s| !s.settings.is_empty() && kept.iter().all(|id| s.settings.contains_key(id)))
+        });
         h
     }
 
