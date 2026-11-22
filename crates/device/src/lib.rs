@@ -20,7 +20,7 @@ pub use codes::{alarm_hint, alarm_text, error_hint, error_text};
 pub use link::{CONSOLE_LIMIT, JobState, Link, LinkError, MAX_FEED, MAX_JOG_MM, MAX_TRAVEL_MM, Snapshot, jog_line, jog_to_line};
 pub use sim::SimulatedGrbl;
 pub use sim_marlin::SimulatedMarlin;
-pub use status::{BuildOptions, MAX_RX_BUFFER, MachineState, Status, parse_build_options, parse_marlin_position, parse_status};
+pub use status::{BuildOptions, MachineState, Status, parse_build_options, parse_marlin_position, parse_status};
 pub use stream::{Progress, RESTART_BACKUP_LINES, StreamOptions, StreamReport, restart_line, stream_program};
 
 use std::io;

@@ -102,28 +102,17 @@ pub struct BuildOptions {
     pub rx_buffer: usize,
 }
 
-/// Longest `[OPT:...]` line looked at (a real one is about 30 bytes).
-const MAX_OPT_LINE: usize = 128;
-/// Largest RX buffer believed. A controller may report a larger buffer than GRBL's 128 bytes, but not an absurd one.
-pub const MAX_RX_BUFFER: usize = 65_536;
-/// Largest block buffer believed.
-const MAX_BLOCKS: usize = 1024;
-
-/// Parses GRBL 1.1's build options, `[OPT:VL,15,128]`: the option codes, then "the value after the first comma contains the
-/// `blockBufferSize`, as int. The value after the second comma contains the `rxBufferSize`, as int."
+/// Parses GRBL 1.1's build options, `[OPT:VL,15,128]`: the option codes, then "The value after the first comma contains the
+/// `blockBufferSize`, as int." and "The value after the second comma contains the `rxBufferSize`, as int."
 /// (<https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface>, "[VER:] and [OPT:]"). Values after those two are ignored. `None`
-/// for any other line, or when a size is missing, not a number, or outside what a real controller could have: an RX buffer
-/// smaller than the longest line the streamer sends (79 bytes and its newline) or larger than [`MAX_RX_BUFFER`].
+/// for any other line, or when a size is missing or not an int.
 pub fn parse_build_options(line: &str) -> Option<BuildOptions> {
     let line = line.trim();
-    if line.len() > MAX_OPT_LINE {
-        return None;
-    }
     let inner = line.strip_prefix("[OPT:")?.strip_suffix(']')?;
     let mut fields = inner.split(',');
     let _codes = fields.next()?;
-    let blocks = fields.next()?.trim().parse::<usize>().ok().filter(|b| (1..=MAX_BLOCKS).contains(b))?;
-    let rx_buffer = fields.next()?.trim().parse::<usize>().ok().filter(|r| (crate::stream::MAX_LINE_BYTES + 1..=MAX_RX_BUFFER).contains(r))?;
+    let blocks = fields.next()?.trim().parse::<usize>().ok()?;
+    let rx_buffer = fields.next()?.trim().parse::<usize>().ok()?;
     Some(BuildOptions { blocks, rx_buffer })
 }
 
@@ -144,7 +133,7 @@ mod tests {
         }
 
         #[test]
-        fn refuses_anything_a_real_controller_could_not_mean() {
+        fn refuses_what_is_not_two_ints() {
             for bad in [
                 "",
                 "ok",
@@ -156,19 +145,13 @@ mod tests {
                 "[OPT:VL,x,128]",
                 "[OPT:VL,15,-128]",
                 "[OPT:VL,15,1e3]",
-                "[OPT:VL,0,128]",
-                "[OPT:VL,15,0]",
-                "[OPT:VL,15,79]",
-                "[OPT:VL,15,65537]",
                 "[OPT:VL,15,99999999999999999999999]",
-                "[OPT:VL,2000,128]",
             ] {
                 assert_eq!(parse_build_options(bad), None, "{bad:?}");
             }
-            assert_eq!(parse_build_options("[OPT:VL,15,80]").map(|o| o.rx_buffer), Some(80), "one line fits");
-            assert_eq!(parse_build_options("[OPT:VL,15,65536]").map(|o| o.rx_buffer), Some(MAX_RX_BUFFER));
-            let long = format!("[OPT:{},15,128]", "V".repeat(200));
-            assert_eq!(parse_build_options(&long), None, "an overlong line is not looked at");
+            // The wiki gives no bounds: any int is taken as it is.
+            assert_eq!(parse_build_options("[OPT:VL,15,79]").map(|o| o.rx_buffer), Some(79));
+            assert_eq!(parse_build_options("[OPT:VL,2000,65537]"), Some(BuildOptions { blocks: 2000, rx_buffer: 65_537 }));
         }
     }
 
