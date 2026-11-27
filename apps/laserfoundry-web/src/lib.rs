@@ -7,6 +7,8 @@
 #![allow(unsafe_code)]
 
 pub mod fontindex;
+#[cfg(target_arch = "wasm32")]
+mod house;
 mod page;
 // Web Serial's pure parts: left out with the machine link (the `machine-link` feature; Maker Connect's change).
 #[cfg(feature = "machine-link")]
@@ -54,7 +56,8 @@ mod web {
             .start(
                 canvas,
                 eframe::WebOptions::default(),
-                Box::new(move |_cc| {
+                Box::new(move |cc| {
+                    crate::house::apply(&cc.egui_ctx);
                     Ok(Box::new(Host {
                         app: LaserFoundryApp::new(
                             Session::new(),
